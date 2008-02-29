@@ -29,7 +29,8 @@ void example1()
 
     cout << "  u = " << u << endl;
     cout << "  v = " << v << endl;
-    cout << "  length(u) = " << length(u) << endl;
+    //cout << "  length(u) = " << length(u) << endl;
+    cout << "  length(u) = " << u.length() << endl;
     cout << "  normalize(v) = " << normalize(v) << endl;
 
     cout << "  dot(u,v) = " << dot(u,v) << endl;
