@@ -9,7 +9,9 @@
  * - VC7.1, 8, 9: /O2 optimizes away the cast to the derived
  *   class in Any<>::exact().
  *
- * - GCC421: -O3
+ * - GCC3.4.5 (MinGW): -O3
+ *
+ * - GCC4.2.1 (MinGW-dw2): -O3
  */
 
 
@@ -26,6 +28,61 @@
 #include <cstddef>
 #include <cstdio>
 
+/* Marker for non-final base classes (base classes that can be
+ * instantiated):
+ */
+struct Itself {};
+
+/* Base class for all classes participating in a SCOOP static class
+ * hierarchy:
+ */
+template<class ExactT>
+class Any
+{
+  public:
+    ExactT& exact() { return * (ExactT*) this; }
+    const ExactT& exact() const { return * (ExactT*) this; }
+};
+
+
+
+/* Traits class for scalar values that can appear as operands in an
+ * expression tree.  Using a traits class obviates the need for having a
+ * distinct node type for scalar values (particularly constants) in the
+ * tree.  By eliminating the Scalar node type (and consequently the
+ * unnecessary copying of constants into a tree), we get a big win since
+ * constants are typically heavily used by graphics-oriented vector and
+ * matrix codes.  Instead, ScalarTraits defines an internal "Acessor"
+ * template class (to delay instantiation until use) which contains
+ * operators for accessing the scalar's value from within a OneD or TwoD
+ * expression tree node:
+ */
+template<typename ScalarT>
+struct ScalarTraits
+{
+  typedef ScalarT					value_type;
+  typedef ScalarT					reference;
+  typedef const ScalarT					const_reference;
+
+  /* Use an internal template class to delay instantiation of the scalar
+   * accessor function until it's actually used.
+   */
+  template<class U = void> struct Access {
+
+    /* For OneD expressions: */
+    value_type operator()(ScalarT o, size_t) const {
+      return o;
+    }
+
+    /* For TwoD expressions: */
+    value_type operator()(ScalarT o, size_t, size_t) const {
+      return o;
+    }
+  };
+
+  /* Define the accessor for easy access: */
+  typedef Access<> Accessor;
+};
 
 /* Only works if T is completely resolved when it's used.  In particular,
  * ExprTraits for A below has to appear before A is declared:
@@ -41,31 +98,26 @@ struct ExprTraits
   typedef const T&					expr_const_reference;
 };
 
-template<typename T>
-struct AccessTraits
+/* Common traits class for a OneD-derived object.  This should be derived
+ * from by the ExprTraits<> for T if the default access function is
+ * acceptable.
+ */
+template<typename ValueT, class T>
+struct OneDTraits
 {
-  typedef typename ExprTraits<T>::value_type		value_type;
-  typedef typename ExprTraits<T>::expr_const_reference	access_reference;
-  inline value_type get(access_reference o, size_t i) const { return o(i); }
-};
+  typedef ValueT					value_type;
 
-template<typename ScalarT>
-struct ScalarTraits
-{
-  typedef ScalarT					reference;
-  typedef const ScalarT					const_reference;
-};
+  /* Use an internal template class to delay instantiation of the 1D
+   * accessor function (T::get()) until it's actually used.
+   */
+  template<class U = void> struct Access {
+    value_type operator()(const T& o, size_t i) const {
+      return o.get(i);
+    }
+  };
 
-
-
-struct Itself {};
-
-template<class ExactT>
-class Any
-{
-  public:
-    inline ExactT& exact() { return * (ExactT*) this; }
-    inline const ExactT& exact() const { return * (ExactT*) this; }
+  /* Define the accessor for easy access: */
+  typedef Access<> Accessor;
 };
 
 template<class DerivedT>
@@ -80,22 +132,30 @@ class OneD
     typedef typename value_traits::const_reference	const_reference;
 
   public:
-    inline value_type operator()(size_t i) const {
+    value_type operator()(size_t i) const {
       return this->exact().get(i);
     }
 };
 
 
 
+
+/* Forward declare for use in defining the traits class: */
 template<class LeftT, class RightT, class OpT> class VectorBinaryXpr;
+
 template<class LeftT, class RightT, class OpT>
 struct ExprTraits< VectorBinaryXpr<LeftT,RightT,OpT> >
+: public OneDTraits<
+   typename OpT::value_type,
+   VectorBinaryXpr<LeftT,RightT,OpT>
+   >
 {
   typedef VectorBinaryXpr<LeftT,RightT,OpT>		self;
   typedef typename OpT::value_type			value_type;
   typedef self						expr_reference;
   typedef self						expr_const_reference;
 };
+
 
 template<class LeftT, class RightT, class OpT>
 class VectorBinaryXpr
@@ -104,6 +164,8 @@ class VectorBinaryXpr
   >
 {
   public:
+    typedef VectorBinaryXpr<LeftT,RightT,OpT>		self;
+    typedef ExprTraits<self>				expr_traits;
     typedef ExprTraits<LeftT>				left_traits;
     typedef ExprTraits<RightT>				right_traits;
 
@@ -116,24 +178,18 @@ class VectorBinaryXpr
 
 
   public:
-    inline VectorBinaryXpr(left_reference left, right_reference right)
+    VectorBinaryXpr(left_reference left, right_reference right)
       : m_left(left), m_right(right) {}
 
   public:
+
     /* OneD Interface */
-    inline value_type get(size_t i) const {
-#if 0
+    value_type get(size_t i) const {
+      typedef typename left_traits::Accessor left_access;
+      typedef typename right_traits::Accessor right_access;
       return OpT().apply(
-	  left_traits().get(m_left, i),
-	  right_traits().get(m_right, i));
-#elif 1
-      return OpT().apply(
-	  AccessTraits<LeftT>().get(m_left, i),
-	  AccessTraits<RightT>().get(m_right, i));
-#elif 0
-      //return OpT().apply(this->m_left(i), this->m_right(i));
-      return OpT().apply(this->m_left(i), this->m_right(i));
-#endif
+	  left_access()(m_left, i),
+	  right_access()(m_right, i));
     }
 
 
@@ -141,18 +197,6 @@ class VectorBinaryXpr
     left_reference		m_left;
     right_reference		m_right;
 };
-
-#if 0
-template<class LeftT, class RightT, class OpT>
-struct AccessTraits< VectorBinaryXpr<LeftT,RightT,OpT> >
-{
-  typedef VectorBinaryXpr<LeftT,RightT,OpT>		self;
-  typedef typename OpT::value_type			value_type;
-  typedef self						expr_reference;
-  typedef self						expr_const_reference;
-  value_type get(const self& o, size_t i) const { return o(i); }
-};
-#endif
 
 template<typename LeftT, typename RightT>
 class ScalarAddOp
@@ -166,13 +210,12 @@ class ScalarAddOp
     typedef double value_type;
     typedef double reference;
     typedef double const_reference;
-    inline value_type apply(left_reference left, right_reference right) const {
+    value_type apply(left_reference left, right_reference right) const {
       return left + right;
     }
 };
 
-/* For vc8, need the "inline" keyword here to force inlining: */
-template<class LeftDerivedT, class RightDerivedT> inline
+template<class LeftDerivedT, class RightDerivedT>
 VectorBinaryXpr<
   LeftDerivedT,
   RightDerivedT,
@@ -193,13 +236,12 @@ operator+(
       left.exact(), right.exact());
 }
 
-
 class Fake1D;
 template<> struct ExprTraits<Fake1D>
+: public OneDTraits<double,Fake1D>
 {
-  typedef double					value_type;
   typedef Fake1D					expr_reference;
-  typedef Fake1D					expr_const_reference;
+  typedef const Fake1D					expr_const_reference;
 };
 
 class Fake1D
@@ -207,24 +249,21 @@ class Fake1D
 {
   public:
     typedef double value_type;
+
   public:
     /* Interface: */
-    inline double get(size_t i) const { return 1.; }
+    double get(size_t i) const { return 1.; }
 };
 
-#if 0
-template<> struct AccessTraits<Fake1D>
+double f1()
 {
-  typedef double					value_type;
-  typedef const Fake1D&					expr_const_reference;
-  value_type get(expr_const_reference o, size_t i) const { return o(i); }
-};
-#endif
+  Fake1D a, b, c;
+  return (a+b+c)(0);
+}
 
 int main()
 {
-  Fake1D a, b;
-  double q = (a+b)(0);
+  double q = f1();
   std::printf("%f\n", q);
   return 0;
 }
