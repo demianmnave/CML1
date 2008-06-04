@@ -6,7 +6,7 @@
 
 PROJECT(CRTP)
 
-ADD_EXECUTABLE(crtp crtp.cpp)
+ADD_EXECUTABLE(crtp_oned crtp_oned.cpp)
 
 # --------------------------------------------------------------------------
 # vim:ft=cmake
