@@ -19,10 +19,7 @@ MESSAGE(STATUS "Building CML ${CML_RELEASE_VERSION}")
 
 SET(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake)
 
-# XXX Importing build settings for a header-only library leads to annoying
-# "Setting CML_BUILD_TYPE to T" warnings:
 # Installation configuration:
-#INCLUDE(CMakeExportBuildSettings)
 IF(WIN32)
 
   # The paths relative to the installation path into which libraries and
@@ -39,19 +36,23 @@ ELSE(WIN32)
   SET(CML_HEADER_PATH include)
 ENDIF(WIN32)
 
-# Don't build tests by default:
+# Don't build tests by default, but do build examples by default:
 OPTION(BUILD_TESTS "Build CML tests." OFF)
-SET(CML_BUILD_TESTS ${BUILD_TESTS})
+OPTION(BUILD_EXAMPLES "Build CML examples." ON)
 
 # Include the source CML headers before others:
 INCLUDE_DIRECTORIES(BEFORE ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 
 # Add subdirectories to build:
 ADD_SUBDIRECTORY(cml)
-ADD_SUBDIRECTORY(examples)
-IF(CML_BUILD_TESTS)
+
+IF(BUILD_EXAMPLES)
+  ADD_SUBDIRECTORY(examples)
+ENDIF(BUILD_EXAMPLES)
+
+IF(BUILD_TESTS)
   ADD_SUBDIRECTORY(tests)
-ENDIF(CML_BUILD_TESTS)
+ENDIF(BUILD_TESTS)
 
 # Setup configuration files:
 CONFIGURE_FILE(
@@ -66,19 +67,23 @@ CONFIGURE_FILE(
   @ONLY
   )
 
-# XXX Importing build settings for a header-only library leads to annoying
-# "Setting CML_BUILD_TYPE to T" warnings:
-# CMAKE_EXPORT_BUILD_SETTINGS(
-#   ${CMAKE_BINARY_DIR}/CMLBuildSettings.cmake)
-# INSTALL(FILES
-#   ${CMAKE_BINARY_DIR}/CMLBuildSettings.cmake
-#   DESTINATION .
-#   )
-
 INSTALL(FILES
   ${CMAKE_BINARY_DIR}/UseCML.cmake
   ${CMAKE_BINARY_DIR}/CMLConfig.cmake
   DESTINATION .
+  )
+
+INSTALL(FILES
+  ${CMAKE_SOURCE_DIR}/doc/parameters.txt
+  DESTINATION doc
+  )
+
+INSTALL(FILES
+  ${CMAKE_SOURCE_DIR}/examples/simple.cpp
+  ${CMAKE_SOURCE_DIR}/examples/cml_config.h
+  ${CMAKE_SOURCE_DIR}/examples/makefile
+  ${CMAKE_SOURCE_DIR}/examples/CMakeLists.txt
+  DESTINATION examples
   )
 
 # Setup CPack:

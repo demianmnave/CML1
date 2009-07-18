@@ -37,10 +37,10 @@ struct QuaternionPromote<
 
     /* The deduced element and storage types: */
     typedef typename promoted_vector::value_type value_type;
-    typedef typename promoted_vector::storage_type storage_type;
+    typedef typename promoted_vector::generator_type generator_type;
 
     /* The deduced quaternion result type: */
-    typedef cml::quaternion<value_type,storage_type,OT,CT> type;
+    typedef cml::quaternion<value_type,generator_type,OT,CT> type;
 
     /* The temporary type: */
     typedef typename type::temporary_type temporary_type;
@@ -102,10 +102,10 @@ struct QuaternionPromote<cml::quaternion<E,AT,OT,CT>, S>
 
     /* The deduced element and storage types: */
     typedef typename promoted_vector::value_type value_type;
-    typedef typename promoted_vector::storage_type storage_type;
+    typedef typename promoted_vector::generator_type generator_type;
 
     /* The deduced quaternion result type: */
-    typedef cml::quaternion<value_type,storage_type,OT,CT> type;
+    typedef cml::quaternion<value_type,generator_type,OT,CT> type;
 
     /* The temporary type: */
     typedef typename type::temporary_type temporary_type;
@@ -122,10 +122,10 @@ struct QuaternionPromote<S, cml::quaternion<E,AT,OT,CT> >
 
     /* The deduced element and storage types: */
     typedef typename promoted_vector::value_type value_type;
-    typedef typename promoted_vector::storage_type storage_type;
+    typedef typename promoted_vector::generator_type generator_type;
 
     /* The deduced quaternion result type: */
-    typedef cml::quaternion<value_type,storage_type,OT,CT> type;
+    typedef cml::quaternion<value_type,generator_type,OT,CT> type;
 
     /* The temporary type: */
     typedef typename type::temporary_type temporary_type;
