@@ -1,8 +1,33 @@
 ; CPack install script designed for a nmake build
-; Modified by dnave 20080331 to use CPACK_NSIS_DISPLAY_NAME as the name
-; that the NSIS installer refers to the project, and to use
-; CPACK_PACKAGE_INSTALL_REGISTRY_KEY for all registry keys instead of
-; CPACK_PACKAGE_INSTALL_DIRECTORY.
+;
+; Modified by dnave 20090101:
+;
+; - The NSIS installer uses CPACK_NSIS_DISPLAY_NAME as the project name,
+;   instead of CPACK_PACKAGE_INSTALL_DIRECTORY
+;
+; - Moved the installation directory selection page before the start menu
+;   folder selection page, since this order is more intuitive.
+;
+; - Can now disable the license page by setting
+;   CPACK_CML_DISABLE_LICENSE_PAGE to TRUE in the CMakeLists.txt file
+;   containing a project's CPack configuration; e.g.
+;
+;      SET(CPACK_CML_DISABLE_LICENSE_PAGE TRUE)
+;
+; - Can now put the component description below the list box,
+;   rather than beside it, by setting CPACK_CML_COMPONENTS_DESCRIPTION_BELOW
+;   to TRUE in the CMakeLists.txt file containing a project's CPack
+;   configuration; e.g.
+;
+;      SET(CPACK_CML_COMPONENTS_DESCRIPTION_BELOW TRUE)
+;
+; - Can now change the "branding text" at the bottom of most installer
+;   pages by setting CPACK_CML_BRANDING_TEXT to the string that should be
+;   displayed; e.g.
+;
+;      SET(CPACK_CML_BRANDING_TEXT "MyApp Installer (NSIS)")
+;
+; - Removed references to unneeded languages.
 
 ;--------------------------------
 ; You must define these values
@@ -21,6 +46,7 @@
   Var DO_NOT_ADD_TO_PATH
   Var ADD_TO_PATH_ALL_USERS
   Var ADD_TO_PATH_CURRENT_USER
+  Var INSTALL_DESKTOP
 
 ;--------------------------------
 ;Include Modern UI
@@ -29,6 +55,7 @@
 
   ;Default installation folder
   InstallDir "$PROGRAMFILES\@CPACK_PACKAGE_INSTALL_DIRECTORY@"  
+
 
 ;--------------------------------
 ;General
@@ -41,64 +68,138 @@
   ;Set compression
   SetCompressor @CPACK_NSIS_COMPRESSOR@
 
-;--------------------------------
-; determine admin versus local install
-; Is install for "AllUsers" or "JustMe"?
-; Default to "JustMe" - set to "AllUsers" if admin or on Win9x
-; This function is used for the very first "custom page" of the installer.
-; This custom page does not show up visibly, but it executes prior to the
-; first visible page and sets up $INSTDIR properly...
-; Choose different default installation folder based on SV_ALLUSERS...
-; "Program Files" for AllUsers, "My Documents" for JustMe...
+  ; Allow setting new "branding text", shown at the bottom of most
+  ; installer pages:
+  ; dnave 20090101:
+  !macro ChangeBrandingText Value
+  BrandingText "${Value}"
+  !macroend
+  !insertmacro ChangeBrandingText "@CPACK_CML_BRANDING_TEXT@"
 
-Function .onInit
-  StrCpy $SV_ALLUSERS "JustMe"
-  StrCpy $INSTDIR "$DOCUMENTS\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+@CPACK_NSIS_DEFINES@   
+   
+  !include Sections.nsh
+  
+;--- Component support macros: ---
+; The code for the add/remove functionality is from:
+;   http://nsis.sourceforge.net/Add/Remove_Functionality
+; It has been modified slightly and extended to provide
+; inter-component dependencies.
+Var AR_SecFlags
+Var AR_RegFlags
+@CPACK_NSIS_SECTION_SELECTED_VARS@
 
+; Loads the "selected" flag for the section named SecName into the
+; variable VarName.
+!macro LoadSectionSelectedIntoVar SecName VarName
+ SectionGetFlags ${${SecName}} $${VarName}
+ IntOp $${VarName} $${VarName} & ${SF_SELECTED}  ;Turn off all other bits
+!macroend
+
+; Loads the value of a variable... can we get around this?
+!macro LoadVar VarName
+  IntOp $R0 0 + $${VarName}
+!macroend
+
+; Sets the value of a variable
+!macro StoreVar VarName IntValue
+  IntOp $${VarName} 0 + ${IntValue}
+!macroend
+
+!macro InitSection SecName
+  ;  This macro reads component installed flag from the registry and
+  ;changes checked state of the section on the components page.
+  ;Input: section index constant name specified in Section command.
+   
   ClearErrors
-  UserInfo::GetName
-  IfErrors noLM
-  Pop $0
-  UserInfo::GetAccountType
-  Pop $1
-  StrCmp $1 "Admin" 0 +3
-    SetShellVarContext all
-    ;MessageBox MB_OK 'User "$0" is in the Admin group'
-    StrCpy $SV_ALLUSERS "AllUsers"
-    Goto done
-  StrCmp $1 "Power" 0 +3
-    SetShellVarContext all
-    ;MessageBox MB_OK 'User "$0" is in the Power Users group'
-    StrCpy $SV_ALLUSERS "AllUsers"
-    Goto done
-    
-  noLM:
-    StrCpy $SV_ALLUSERS "AllUsers"
-    ;Get installation folder from registry if available
+  ;Reading component status from registry
+  ReadRegDWORD $AR_RegFlags HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@\Components\${SecName}" "Installed"
+  IfErrors "default_${SecName}"
+    ;Status will stay default if registry value not found
+    ;(component was never installed)
+  IntOp $AR_RegFlags $AR_RegFlags & ${SF_SELECTED} ;Turn off all other bits
+  SectionGetFlags ${${SecName}} $AR_SecFlags  ;Reading default section flags
+  IntOp $AR_SecFlags $AR_SecFlags & 0xFFFE  ;Turn lowest (enabled) bit off
+  IntOp $AR_SecFlags $AR_RegFlags | $AR_SecFlags      ;Change lowest bit
 
-  done:
-  StrCmp $SV_ALLUSERS "AllUsers" 0 +2
-    StrCpy $INSTDIR "$PROGRAMFILES\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+  ; Note whether this component was installed before
+  !insertmacro StoreVar ${SecName}_was_installed $AR_RegFlags
+  IntOp $R0 $AR_RegFlags & $AR_RegFlags
+  
+  ;Writing modified flags
+  SectionSetFlags ${${SecName}} $AR_SecFlags
+  
+ "default_${SecName}:"
+ !insertmacro LoadSectionSelectedIntoVar ${SecName} ${SecName}_selected
+!macroend
+ 
+!macro FinishSection SecName
+  ;  This macro reads section flag set by user and removes the section
+  ;if it is not selected.
+  ;Then it writes component installed flag to registry
+  ;Input: section index constant name specified in Section command.
+ 
+  SectionGetFlags ${${SecName}} $AR_SecFlags  ;Reading section flags
+  ;Checking lowest bit:
+  IntOp $AR_SecFlags $AR_SecFlags & ${SF_SELECTED}
+  IntCmp $AR_SecFlags 1 "leave_${SecName}"
+    ;Section is not selected:
+    ;Calling Section uninstall macro and writing zero installed flag
+    !insertmacro "Remove_${${SecName}}"
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@\Components\${SecName}" \
+  "Installed" 0
+    Goto "exit_${SecName}"
+ 
+ "leave_${SecName}:"
+    ;Section is selected:
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@\Components\${SecName}" \
+  "Installed" 1
+ 
+ "exit_${SecName}:"
+!macroend
+ 
+!macro RemoveSection SecName
+  ;  This macro is used to call section's Remove_... macro
+  ;from the uninstaller.
+  ;Input: section index constant name specified in Section command.
+ 
+  !insertmacro "Remove_${${SecName}}"
+!macroend
 
-  StrCmp "@CPACK_NSIS_MODIFY_PATH@" "ON" 0 noOptionsPage
-    !insertmacro MUI_INSTALLOPTIONS_EXTRACT "NSIS.InstallOptions.ini"
-
-  noOptionsPage:
-FunctionEnd
+; Determine whether the selection of SecName changed
+!macro MaybeSelectionChanged SecName
+  !insertmacro LoadVar ${SecName}_selected
+  SectionGetFlags ${${SecName}} $R1
+  IntOp $R1 $R1 & ${SF_SELECTED} ;Turn off all other bits
+  
+  ; See if the status has changed:
+  IntCmp $R0 $R1 "${SecName}_unchanged"
+  !insertmacro LoadSectionSelectedIntoVar ${SecName} ${SecName}_selected
+  
+  IntCmp $R1 ${SF_SELECTED} "${SecName}_was_selected"
+  !insertmacro "Deselect_required_by_${SecName}"
+  goto "${SecName}_unchanged"
+  
+  "${SecName}_was_selected:"
+  !insertmacro "Select_${SecName}_depends"
+  
+  "${SecName}_unchanged:"
+!macroend
+;--- End of Add/Remove macros ---
 
 ;--------------------------------
 ;Interface Settings
 
   !define MUI_HEADERIMAGE
   !define MUI_ABORTWARNING
-
+    
 ;--------------------------------
 ; path functions
 
 !verbose 3
 !include "WinMessages.NSH"
 !verbose 4
- 
+
 ;----------------------------------------
 ; based upon a script of "Written by KiCHiK 2003-01-18 05:57:02"
 ;----------------------------------------
@@ -205,7 +306,7 @@ Function AddToPath
     Pop $1
     Pop $0
 FunctionEnd
- 
+
  
 ; RemoveFromPath - Remove a given dir from the path
 ;     Input: head of the stack
@@ -293,11 +394,10 @@ Function un.RemoveFromPath
     Pop $0
 FunctionEnd
  
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Uninstall sutff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
- 
+
 ###########################################
 #            Utility Functions            #
 ###########################################
@@ -403,47 +503,155 @@ Function ConditionalAddToRegisty
   Pop $0
   Pop $1
   StrCmp "$0" "" ConditionalAddToRegisty_EmptyString
-    ;WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "$1" "$0"
-
-    WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "$1" "$0"
-
+    WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" \
+    "$1" "$0"
     ;MessageBox MB_OK "Set Registry: '$1' to '$0'"
     DetailPrint "Set install registry entry: '$1' to '$0'"
   ConditionalAddToRegisty_EmptyString:
 FunctionEnd
 
 ;--------------------------------
-; Define some macro setting for the gui
 
-  !define CPACK_PACKAGE_ICON@CPACK_PACKAGE_ICON@
-  !ifndef CPACK_PACKAGE_ICON
-  !define MUI_HEADERIMAGE_BITMAP "@CPACK_PACKAGE_ICON@"
+!ifdef CPACK_USES_DOWNLOAD
+Function DownloadFile
+    IfFileExists $INSTDIR\* +2
+    CreateDirectory $INSTDIR
+    Pop $0
+
+    ; Skip if already downloaded
+    IfFileExists $INSTDIR\$0 0 +2
+    Return
+
+    StrCpy $1 "@CPACK_DOWNLOAD_SITE@"
+
+  try_again:
+    NSISdl::download "$1/$0" "$INSTDIR\$0"
+    
+    Pop $1
+    StrCmp $1 "success" success
+    StrCmp $1 "Cancelled" cancel
+    MessageBox MB_OK "Download failed: $1"
+  cancel:
+    Return
+  success:
+FunctionEnd
+!endif
+
+;--------------------------------
+; Installation types
+@CPACK_NSIS_INSTALLATION_TYPES@
+
+;--------------------------------
+; Component sections
+@CPACK_NSIS_COMPONENT_SECTIONS@
+
+;--------------------------------
+; Define some macro setting for the gui
+@CPACK_NSIS_INSTALLER_MUI_ICON_CODE@
+@CPACK_NSIS_INSTALLER_ICON_CODE@
+@CPACK_NSIS_INSTALLER_MUI_COMPONENTS_DESC@
+
+  ; Put the component description block below the list box, but only if
+  ; descriptions are enabled:
+  ; dnave 20090101:
+  !ifndef MUI_COMPONENTSPAGE_NODESC
+    !define CML_COMPONENTS_DESCRIPTION_BELOW_@CPACK_CML_COMPONENTS_DESCRIPTION_BELOW@
+    !ifdef CML_COMPONENTS_DESCRIPTION_BELOW_TRUE
+      !define MUI_COMPONENTSPAGE_SMALLDESC
+    !endif
   !endif
 
 ;--------------------------------
 ;Pages
   !insertmacro MUI_PAGE_WELCOME
 
+  ; Skip the license page if requested:
+  ; dnave 20090101:
+  !define CML_DISABLE_LICENSE_PAGE_@CPACK_CML_DISABLE_LICENSE_PAGE@
+  !ifndef CML_DISABLE_LICENSE_PAGE_TRUE
   !insertmacro MUI_PAGE_LICENSE "@CPACK_RESOURCE_FILE_LICENSE@"
+  !endif
+
   Page custom InstallOptionsPage
+
+  @CPACK_NSIS_PAGE_COMPONENTS@
+
   !insertmacro MUI_PAGE_DIRECTORY
   
   ;Start Menu Folder Page Configuration
   !define MUI_STARTMENUPAGE_REGISTRY_ROOT "SHCTX" 
   !define MUI_STARTMENUPAGE_REGISTRY_KEY "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" 
   !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "Start Menu Folder"
+
   !insertmacro MUI_PAGE_STARTMENU Application $STARTMENU_FOLDER
+
+  ; dnave 20090101:
+  ; @CPACK_NSIS_PAGE_COMPONENTS@
 
   !insertmacro MUI_PAGE_INSTFILES
   !insertmacro MUI_PAGE_FINISH
 
   !insertmacro MUI_UNPAGE_CONFIRM
   !insertmacro MUI_UNPAGE_INSTFILES
-  
+
 ;--------------------------------
 ;Languages
+
  
-  !insertmacro MUI_LANGUAGE "English"
+  ; Only need English:
+  ; dnave 20090101:
+  !insertmacro MUI_LANGUAGE "English" ;first language is the default language
+;   !insertmacro MUI_LANGUAGE "Albanian"
+;   !insertmacro MUI_LANGUAGE "Arabic"
+;   !insertmacro MUI_LANGUAGE "Basque"
+;   !insertmacro MUI_LANGUAGE "Belarusian"
+;   !insertmacro MUI_LANGUAGE "Bosnian"
+;   !insertmacro MUI_LANGUAGE "Breton"
+;   !insertmacro MUI_LANGUAGE "Bulgarian"
+;   !insertmacro MUI_LANGUAGE "Croatian"
+;   !insertmacro MUI_LANGUAGE "Czech"
+;   !insertmacro MUI_LANGUAGE "Danish"
+;   !insertmacro MUI_LANGUAGE "Dutch"
+;   !insertmacro MUI_LANGUAGE "Estonian"
+;   !insertmacro MUI_LANGUAGE "Farsi"
+;   !insertmacro MUI_LANGUAGE "Finnish"
+;   !insertmacro MUI_LANGUAGE "French"
+;   !insertmacro MUI_LANGUAGE "German"
+;   !insertmacro MUI_LANGUAGE "Greek"
+;   !insertmacro MUI_LANGUAGE "Hebrew"
+;   !insertmacro MUI_LANGUAGE "Hungarian"
+;   !insertmacro MUI_LANGUAGE "Icelandic"
+;   !insertmacro MUI_LANGUAGE "Indonesian"
+;   !insertmacro MUI_LANGUAGE "Irish"
+;   !insertmacro MUI_LANGUAGE "Italian"
+;   !insertmacro MUI_LANGUAGE "Japanese"
+;   !insertmacro MUI_LANGUAGE "Korean"
+;   !insertmacro MUI_LANGUAGE "Kurdish"
+;   !insertmacro MUI_LANGUAGE "Latvian"
+;   !insertmacro MUI_LANGUAGE "Lithuanian"
+;   !insertmacro MUI_LANGUAGE "Luxembourgish"
+;   !insertmacro MUI_LANGUAGE "Macedonian"
+;   !insertmacro MUI_LANGUAGE "Malay"
+;   !insertmacro MUI_LANGUAGE "Mongolian"
+;   !insertmacro MUI_LANGUAGE "Norwegian"
+;   !insertmacro MUI_LANGUAGE "Polish"
+;   !insertmacro MUI_LANGUAGE "Portuguese"
+;   !insertmacro MUI_LANGUAGE "PortugueseBR"
+;   !insertmacro MUI_LANGUAGE "Romanian"
+;   !insertmacro MUI_LANGUAGE "Russian"
+;   !insertmacro MUI_LANGUAGE "Serbian"
+;   !insertmacro MUI_LANGUAGE "SerbianLatin"
+;   !insertmacro MUI_LANGUAGE "SimpChinese"
+;   !insertmacro MUI_LANGUAGE "Slovak"
+;   !insertmacro MUI_LANGUAGE "Slovenian"
+;   !insertmacro MUI_LANGUAGE "Spanish"
+;   !insertmacro MUI_LANGUAGE "Swedish"
+;   !insertmacro MUI_LANGUAGE "Thai"
+;   !insertmacro MUI_LANGUAGE "TradChinese"
+;   !insertmacro MUI_LANGUAGE "Turkish"
+;   !insertmacro MUI_LANGUAGE "Ukrainian"
+;   !insertmacro MUI_LANGUAGE "Welsh"
+
 
 ;--------------------------------
 ;Reserve Files
@@ -455,28 +663,15 @@ FunctionEnd
   ReserveFile "NSIS.InstallOptions.ini"
   !insertmacro MUI_RESERVEFILE_INSTALLOPTIONS
 
-
 ;--------------------------------
 ;Installer Sections
 
-Section "Add to path"
-  Push $INSTDIR\bin
-  ;Read a value from an InstallOptions INI file
-  !insertmacro MUI_INSTALLOPTIONS_READ $DO_NOT_ADD_TO_PATH "NSIS.InstallOptions.ini" "Field 2" "State"
-  !insertmacro MUI_INSTALLOPTIONS_READ $ADD_TO_PATH_ALL_USERS "NSIS.InstallOptions.ini" "Field 3" "State"
-  !insertmacro MUI_INSTALLOPTIONS_READ $ADD_TO_PATH_CURRENT_USER "NSIS.InstallOptions.ini" "Field 4" "State"
-  StrCmp $DO_NOT_ADD_TO_PATH "1" doNotAddToPath 0
-    Call AddToPath
-  doNotAddToPath:
-SectionEnd
-
-Section "Installer Section" InstSection
-
+Section "-Core installation"
   ;Use the entire tree produced by the INSTALL target.  Keep the
   ;list of directories here in sync with the RMDir commands below.
   SetOutPath "$INSTDIR"
-  File /r "${INST_DIR}\*.*"
-
+  @CPACK_NSIS_FULL_INSTALL@
+  
   ;Store installation folder
   WriteRegStr SHCTX "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "" $INSTDIR
   
@@ -494,7 +689,21 @@ Section "Installer Section" InstSection
   Push "UninstallString"
   Push "$INSTDIR\Uninstall.exe"
   Call ConditionalAddToRegisty
-
+  Push "NoRepair"
+  Push "1"
+  Call ConditionalAddToRegisty
+  
+  !ifdef CPACK_NSIS_ADD_REMOVE
+  ;Create add/remove functionality
+  Push "ModifyPath"
+  Push "$INSTDIR\AddRemove.exe"
+  Call ConditionalAddToRegisty
+  !else
+  Push "NoModify"
+  Push "1"
+  Call ConditionalAddToRegisty
+  !endif
+  
   ; Optional registration
   Push "DisplayIcon"
   Push "$INSTDIR\@CPACK_NSIS_INSTALLED_ICON_NAME@"
@@ -508,12 +717,13 @@ Section "Installer Section" InstSection
   Push "Contact"
   Push "@CPACK_NSIS_CONTACT@"
   Call ConditionalAddToRegisty
-
+  !insertmacro MUI_INSTALLOPTIONS_READ $INSTALL_DESKTOP "NSIS.InstallOptions.ini" "Field 5" "State"
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
-    
+  
   ;Create shortcuts
   CreateDirectory "$SMPROGRAMS\$STARTMENU_FOLDER"
 @CPACK_NSIS_CREATE_ICONS@
+@CPACK_NSIS_CREATE_ICONS_EXTRA@
   CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 
   ; Write special uninstall registry entries
@@ -529,6 +739,9 @@ Section "Installer Section" InstSection
   Push "AddToPathCurrentUser"
   Push "$ADD_TO_PATH_CURRENT_USER"
   Call ConditionalAddToRegisty
+  Push "InstallToDesktop"
+  Push "$INSTALL_DESKTOP"
+  Call ConditionalAddToRegisty
 
 @CPACK_NSIS_EXTRA_INSTALL_COMMANDS@
   
@@ -536,11 +749,22 @@ Section "Installer Section" InstSection
 
 SectionEnd
 
+Section "-Add to path"
+  Push $INSTDIR\bin
+  ;Read a value from an InstallOptions INI file
+  !insertmacro MUI_INSTALLOPTIONS_READ $DO_NOT_ADD_TO_PATH "NSIS.InstallOptions.ini" "Field 2" "State"
+  !insertmacro MUI_INSTALLOPTIONS_READ $ADD_TO_PATH_ALL_USERS "NSIS.InstallOptions.ini" "Field 3" "State"
+  !insertmacro MUI_INSTALLOPTIONS_READ $ADD_TO_PATH_CURRENT_USER "NSIS.InstallOptions.ini" "Field 4" "State"
+  StrCmp "@CPACK_NSIS_MODIFY_PATH@" "ON" 0 doNotAddToPath
+  StrCmp $DO_NOT_ADD_TO_PATH "1" doNotAddToPath 0  
+    Call AddToPath
+  doNotAddToPath:
+SectionEnd
+
 ;--------------------------------
 ; Create custom pages
 Function InstallOptionsPage
-  ;!insertmacro MUI_HEADER_TEXT "Install Options" "Chose options for installing @CPACK_PACKAGE_INSTALL_DIRECTORY@"
-  !insertmacro MUI_HEADER_TEXT "Install Options" "Chose options for installing @CPACK_NSIS_DISPLAY_NAME@"
+  !insertmacro MUI_HEADER_TEXT "Install Options" "Chose options for installing @CPACK_PACKAGE_INSTALL_DIRECTORY@"
   !insertmacro MUI_INSTALLOPTIONS_DISPLAY "NSIS.InstallOptions.ini"
 
 FunctionEnd
@@ -568,22 +792,62 @@ Function un.onInit
     ;Get installation folder from registry if available
 
   done:
+    
+FunctionEnd
+
+;--- Add/Remove callback functions: ---
+!macro SectionList MacroName
+  ;This macro used to perform operation on multiple sections.
+  ;List all of your components in following manner here.
+@CPACK_NSIS_COMPONENT_SECTION_LIST@
+!macroend
+ 
+Section -FinishComponents
+  ;Removes unselected components and writes component status to registry
+  !insertmacro SectionList "FinishSection"
+  
+!ifdef CPACK_NSIS_ADD_REMOVE  
+  ; Get the name of the installer executable
+  System::Call 'kernel32::GetModuleFileNameA(i 0, t .R0, i 1024) i r1'
+  StrCpy $R3 $R0
+  
+  ; Strip off the last 13 characters, to see if we have AddRemove.exe
+  StrLen $R1 $R0
+  IntOp $R1 $R0 - 13
+  StrCpy $R2 $R0 13 $R1
+  StrCmp $R2 "AddRemove.exe" addremove_installed
+  
+  ; We're not running AddRemove.exe, so install it
+  CopyFiles $R3 $INSTDIR\AddRemove.exe
+  
+  addremove_installed:
+!endif
+SectionEnd
+;--- End of Add/Remove callback functions ---
+
+;--------------------------------
+; Component dependencies
+Function .onSelChange
+  !insertmacro SectionList MaybeSelectionChanged
 FunctionEnd
 
 ;--------------------------------
 ;Uninstaller Section
 
 Section "Uninstall"
-  ;ReadRegStr $START_MENU SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "StartMenu"
-  ReadRegStr $START_MENU SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "StartMenu"
+  ReadRegStr $START_MENU SHCTX \
+   "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "StartMenu"
   ;MessageBox MB_OK "Start menu is in: $START_MENU"
-  ;ReadRegStr $DO_NOT_ADD_TO_PATH SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "DoNotAddToPath"
-  ReadRegStr $DO_NOT_ADD_TO_PATH SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "DoNotAddToPath"
-  ;ReadRegStr $ADD_TO_PATH_ALL_USERS SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "AddToPathAllUsers"
-  ReadRegStr $ADD_TO_PATH_ALL_USERS SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "AddToPathAllUsers"
-  ;ReadRegStr $ADD_TO_PATH_CURRENT_USER SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "AddToPathCurrentUser"
-  ReadRegStr $ADD_TO_PATH_CURRENT_USER SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "AddToPathCurrentUser"
+  ReadRegStr $DO_NOT_ADD_TO_PATH SHCTX \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "DoNotAddToPath"
+  ReadRegStr $ADD_TO_PATH_ALL_USERS SHCTX \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "AddToPathAllUsers"
+  ReadRegStr $ADD_TO_PATH_CURRENT_USER SHCTX \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "AddToPathCurrentUser"
   ;MessageBox MB_OK "Add to path: $DO_NOT_ADD_TO_PATH all users: $ADD_TO_PATH_ALL_USERS"
+  ReadRegStr $INSTALL_DESKTOP SHCTX \
+    "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@" "InstallToDesktop"
+  ;MessageBox MB_OK "Install to desktop: $INSTALL_DESKTOP "
 
 @CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS@
 
@@ -592,10 +856,14 @@ Section "Uninstall"
 @CPACK_NSIS_DELETE_FILES@
 @CPACK_NSIS_DELETE_DIRECTORIES@
 
+!ifdef CPACK_NSIS_ADD_REMOVE  
+  ;Remove the add/remove program
+  Delete "$INSTDIR\AddRemove.exe"
+!endif
+
   ;Remove the uninstaller itself.
   Delete "$INSTDIR\Uninstall.exe"
-  ;DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
-  DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
+  DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
 
   ;Remove the installation directory if it is empty.
   RMDir "$INSTDIR"
@@ -603,10 +871,14 @@ Section "Uninstall"
   ; Remove the registry entries.
   DeleteRegKey SHCTX "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
 
+  ; Removes all optional components
+  !insertmacro SectionList "RemoveSection"
+  
   !insertmacro MUI_STARTMENU_GETFOLDER Application $MUI_TEMP
     
   Delete "$SMPROGRAMS\$MUI_TEMP\Uninstall.lnk"
 @CPACK_NSIS_DELETE_ICONS@
+@CPACK_NSIS_DELETE_ICONS_EXTRA@
   
   ;Delete empty start menu parent diretories
   StrCpy $MUI_TEMP "$SMPROGRAMS\$MUI_TEMP"
@@ -625,7 +897,7 @@ Section "Uninstall"
   ; try to fix it.
   StrCpy $MUI_TEMP "$START_MENU"
   Delete "$SMPROGRAMS\$MUI_TEMP\Uninstall.lnk"
-@CPACK_NSIS_DELETE_ICONS@
+@CPACK_NSIS_DELETE_ICONS_EXTRA@
   
   ;Delete empty start menu parent diretories
   StrCpy $MUI_TEMP "$SMPROGRAMS\$MUI_TEMP"
@@ -648,4 +920,50 @@ Section "Uninstall"
   doNotRemoveFromPath:
 SectionEnd
 
+;--------------------------------
+; determine admin versus local install
+; Is install for "AllUsers" or "JustMe"?
+; Default to "JustMe" - set to "AllUsers" if admin or on Win9x
+; This function is used for the very first "custom page" of the installer.
+; This custom page does not show up visibly, but it executes prior to the
+; first visible page and sets up $INSTDIR properly...
+; Choose different default installation folder based on SV_ALLUSERS...
+; "Program Files" for AllUsers, "My Documents" for JustMe...
 
+Function .onInit
+  ; Reads components status for registry
+  !insertmacro SectionList "InitSection"
+
+  StrCpy $SV_ALLUSERS "JustMe"
+  StrCpy $INSTDIR "$DOCUMENTS\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+
+  ClearErrors
+  UserInfo::GetName
+  IfErrors noLM
+  Pop $0
+  UserInfo::GetAccountType
+  Pop $1
+  StrCmp $1 "Admin" 0 +3
+    SetShellVarContext all
+    ;MessageBox MB_OK 'User "$0" is in the Admin group'
+    StrCpy $SV_ALLUSERS "AllUsers"
+    Goto done
+  StrCmp $1 "Power" 0 +3
+    SetShellVarContext all
+    ;MessageBox MB_OK 'User "$0" is in the Power Users group'
+    StrCpy $SV_ALLUSERS "AllUsers"
+    Goto done
+    
+  noLM:
+    StrCpy $SV_ALLUSERS "AllUsers"
+    ;Get installation folder from registry if available
+
+  done:
+  StrCmp $SV_ALLUSERS "AllUsers" 0 +2
+    StrCpy $INSTDIR "$PROGRAMFILES\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+
+  StrCmp "@CPACK_NSIS_MODIFY_PATH@" "ON" 0 noOptionsPage
+    !insertmacro MUI_INSTALLOPTIONS_EXTRACT "NSIS.InstallOptions.ini"
+
+  noOptionsPage:
+FunctionEnd

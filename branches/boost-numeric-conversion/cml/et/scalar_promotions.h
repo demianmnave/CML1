@@ -13,8 +13,8 @@ Boost Software License, v1.0 (see cml/LICENSE for details).
 #ifndef scalar_promotions_h
 #define scalar_promotions_h
 
+#if 0
 #include <cml/core/cml_meta.h>
-
 namespace cml {
 namespace et {
 
@@ -113,6 +113,45 @@ template<class E1_in, class E2_in> struct ScalarPromote
 
 } // namespace et
 } // namespace cml
+#else
+
+namespace cml {
+namespace et {
+
+#include <boost/numeric/conversion/conversion_traits.hpp>
+#include <boost/type_traits/is_floating_point.hpp>
+#include <boost/type_traits/is_integral.hpp>
+#include <boost/type_traits/is_same.hpp>
+#include <boost/mpl/if.hpp>
+
+/* For convenience: */
+namespace mpl = boost::mpl;
+
+namespace detail {
+} // namespace detail
+
+/** @class ScalarPromote
+ *  @brief Template for compile-time type promotion via C promotion rules.
+ *  @sa http://msdn.microsoft.com/en-us/library/09ka8bxx.aspx
+ */
+template<class E1, class E2> struct ScalarPromote
+{
+    /** The conversion_traits<> type. */
+    typedef bn::conversion_traits<E1,E2>                conversion_traits;
+    typedef typename conversion_traits::supertype       type;
+
+    typedef typename mpl::if_<
+
+        /* Convert floating point types to the larger type: */
+        mpl::or_<
+            boost::is_floating_point<E1>,
+            boost::is_floating_point<E2>
+            >, typename conversion_traits::supertype,
+};
+
+} // namespace et
+} // namespace cml
+#endif
 
 #endif
 

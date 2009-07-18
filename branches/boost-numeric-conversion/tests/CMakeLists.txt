@@ -31,6 +31,9 @@ FOREACH(Test ${FunctionTests})
   ADD_EXECUTABLE(${Test} ${Test}.cpp)
 ENDFOREACH(Test)
 
+# Setup expression-template tests:
+ADD_SUBDIRECTORY(et)
+
 # Setup the timing tests:
 ADD_SUBDIRECTORY(timing)
 

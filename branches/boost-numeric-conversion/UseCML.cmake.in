@@ -6,14 +6,22 @@
 
 # Build settings to use CML in an external project.
 
-# Load the original settings used to build CML:
-IF(CML_BUILD_SETTINGS_FILE)
-  INCLUDE(CMakeImportBuildSettings)
-  CMAKE_IMPORT_BUILD_SETTINGS(${CML_BUILD_SETTINGS_FILE})
-ENDIF(CML_BUILD_SETTINGS_FILE)
+# Find Boost headers:
+FIND_PACKAGE(Boost REQUIRED)
+IF(Boost_FOUND)
+  MESSAGE(STATUS "Found Boost ${Boost_VERSION}")
+  IF(Boost_VERSION LESS 103401)
+    MESSAGE(FATAL_ERROR "CML requires Boost version 1.34.1 or newer")
+  ENDIF(Boost_VERSION LESS 103401)
+
+  # Setup to use Boost headers:
+  INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIR})
+ELSE(Boost_FOUND)
+  MESSAGE(FATAL_ERROR "Could not find a usable Boost version")
+ENDIF(Boost_FOUND)
 
 # Setup include paths:
-INCLUDE_DIRECTORIES(BEFORE ${CML_HEADER_PATH})
+INCLUDE_DIRECTORIES(${CML_HEADER_PATH})
 
 # --------------------------------------------------------------------------
 # vim:ft=cmake
