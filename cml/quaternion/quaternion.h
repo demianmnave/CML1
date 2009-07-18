@@ -45,16 +45,16 @@ template<
 >
 class quaternion
 {
+#if 0
     /* The ArrayType must be fixed<> or external<>: */
     CML_STATIC_REQUIRE_M(
             (same_type< ArrayType, fixed<> >::is_true
              || same_type< ArrayType, external<> >::is_true),
             quaternion_requires_fixed_size_array_type_error);
-
+#endif
   public:
 
     /* Shorthand for the array type generator: */
-    typedef ArrayType storage_type;
     typedef typename ArrayType::template rebind<4>::other generator_type;
 
     /* Vector representing the quaternion.  Use the rebinding template to
@@ -78,7 +78,7 @@ class quaternion
     /* XXX Need to verify that this is a true scalar type. */
 
     /* The quaternion type: */
-    typedef quaternion<Element,storage_type,order_type,cross_type>
+    typedef quaternion<Element,ArrayType,order_type,cross_type>
         quaternion_type;
 
     /* For integration into the expression template code: */
@@ -86,7 +86,7 @@ class quaternion
 
     /* For integration into the expression template code: */
     typedef quaternion<
-        Element, typename vector_temporary::storage_type,
+        Element, typename vector_temporary::generator_type,
         order_type, cross_type> temporary_type;
 
     /* For integration into the expression templates code: */
@@ -427,7 +427,8 @@ class quaternion
      * of this method.
      */
     quaternion_type& operator*=(const quaternion_type& q) {
-        return (*this = *this * q);
+        *this = *this * q;
+        return *this;
     }
 
     /** Accumulated multiplication with a quaternion expression.
@@ -442,7 +443,8 @@ class quaternion
      * of this method.
      */
     template<typename XprT> quaternion_type& operator*=(QUATXPR_ARG_TYPE e) {
-        return (*this = *this * e);
+        *this = *this * e;
+        return *this;
     }
 
     /* NOTE: Quaternion division no longer supported, but I'm leaving the

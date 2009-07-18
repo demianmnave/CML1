@@ -26,6 +26,7 @@ SET(FunctionTests
   external_assignment
 
   integer_vectors
+  inverse1
   )
 FOREACH(Test ${FunctionTests})
   ADD_EXECUTABLE(${Test} ${Test}.cpp)

@@ -33,7 +33,6 @@ class vector< Element, external<Size> >
   public:
 
     /* Shorthand for the generator: */
-    typedef external<> storage_type;
     typedef external<Size> generator_type;
 
     /* Shorthand for the array type: */
