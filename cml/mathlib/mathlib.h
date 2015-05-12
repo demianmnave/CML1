@@ -10,7 +10,6 @@ Boost Software License, v1.0 (see cml/LICENSE for details).
  *  @brief
  */
 
-
 #ifndef mathlib_h
 #define mathlib_h
 
