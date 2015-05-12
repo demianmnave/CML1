@@ -60,7 +60,6 @@ Boost Software License, v1.0 (see cml/LICENSE for details).
  * USA Oct. 2003
  */
 
-
 #ifndef cml_h
 #define cml_h
 
