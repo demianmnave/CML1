@@ -19,7 +19,7 @@ FOREACH(Header ${FILELIST})
   GET_FILENAME_COMPONENT(_path ${Header} PATH)
 
   # Install to _path, relative to the header installation directory:
-  INSTALL(FILES ${Header} DESTINATION "${CML_HEADER_PATH}cml/${_path}")
+  INSTALL(FILES ${Header} DESTINATION "${CML_HEADER_PATH}/cml/${_path}")
 ENDFOREACH(Header)
 
 # Add an interface library if cmake is version 3.1 or newer
