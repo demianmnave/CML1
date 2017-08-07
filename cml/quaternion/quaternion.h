@@ -9,6 +9,7 @@
 #ifndef	cml_quaternion_quaternion_h
 #define	cml_quaternion_quaternion_h
 
+#include <cml/storage/compiled_selector.h>
 #include <cml/quaternion/cross_tags.h>
 #include <cml/quaternion/order_tags.h>
 
